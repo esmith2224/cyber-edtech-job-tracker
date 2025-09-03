@@ -43,97 +43,97 @@ MAX_PER_SITE = 300 # safety cap
 
 @dataclass
 class Job:
-company: str
-title: str
-location: str
-url: str
+    company: str
+    title: str
+    location: str
+    url: str
 
 def fetch(url: str) -> str:
-import requests
-r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT)
-r.raise_for_status()
-return r.text
+    import requests
+    r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT)
+    r.raise_for_status()
+    return r.text
 
 def matches_keywords(text: str) -> bool:
-t = text.lower()
-return any(k in t for k in KEYWORDS)
+    t = text.lower()
+    return any(k in t for k in KEYWORDS)
 
 def parse_greenhouse(company: str, html: str) -> List[Job]:
-soup = BeautifulSoup(html, "html.parser")
-jobs = []
-for a in soup.select("a[href*='/job/'], a[href*='boards.greenhouse.io']"):
-title = a.get_text(strip=True)
-href = a.get("href") or ""
-if href.startswith("/"):
-href = "https://boards.greenhouse.io" + href
-if title and "http" in href and matches_keywords(title):
-# try to grab a nearby location tag if present
-loc_el = a.find_next(lambda tag: tag.name in ("span","div") and "location" in " ".join(tag.get("class", [])).lower())
-loc = loc_el.get_text(strip=True) if loc_el else ""
-jobs.append(Job(company, title, loc, href))
-if len(jobs) >= MAX_PER_SITE:
-break
-return jobs
+    soup = BeautifulSoup(html, "html.parser")
+    jobs = []
+    for a in soup.select("a[href*='/job/'], a[href*='boards.greenhouse.io']"):
+        title = a.get_text(strip=True)
+        href = a.get("href") or ""
+        if href.startswith("/"):
+            href = "https://boards.greenhouse.io" + href
+        if title and "http" in href and matches_keywords(title):
+            # try to grab a nearby location tag if present
+            loc_el = a.find_next(lambda tag: tag.name in ("span","div") and "location" in " ".join(tag.get("class", [])).lower())
+            loc = loc_el.get_text(strip=True) if loc_el else ""
+            jobs.append(Job(company, title, loc, href))
+        if len(jobs) >= MAX_PER_SITE:
+            break
+   return jobs
 
 def parse_generic(company: str, html: str) -> List[Job]:
-soup = BeautifulSoup(html, "html.parser")
-jobs = []
-for a in soup.select("a"):
-title = a.get_text(" ", strip=True)
-href = a.get("href") or ""
-if not title or not href:
-continue
-# extremely simple heuristic: keyword match + job/career in URL text
-if matches_keywords(title) and ("job" in href.lower() or "career" in href.lower()):
-# try to make absolute links if site provides a base/canonical
-if href.startswith("/"):
-origin = ""
-base = soup.find("base")
-canon = soup.find("link", rel="canonical")
-import re
-m = re.match(r"(https?://[^/]+)", (base.get("href") if base else "") or (canon.get("href") if canon else "") or "")
-if m:
-origin = m.group(1)
-if origin:
-href = origin + href
-jobs.append(Job(company, title, "", href))
-if len(jobs) >= MAX_PER_SITE:
-break
-return jobs
+    soup = BeautifulSoup(html, "html.parser")
+    jobs = []
+    for a in soup.select("a"):
+        title = a.get_text(" ", strip=True)
+        href = a.get("href") or ""
+        if not title or not href:
+            continue
+        # extremely simple heuristic: keyword match + job/career in URL text
+        if matches_keywords(title) and ("job" in href.lower() or "career" in href.lower()):
+         # try to make absolute links if site provides a base/canonical
+           if href.startswith("/"):
+              origin = ""
+              base = soup.find("base")
+              canon = soup.find("link", rel="canonical")
+              import re
+              m = re.match(r"(https?://[^/]+)", (base.get("href") if base else "") or (canon.get("href") if canon else "") or "")
+              if m:
+                  origin = m.group(1)
+              if origin:
+                  href = origin + href
+          jobs.append(Job(company, title, "", href))
+      if len(jobs) >= MAX_PER_SITE:
+          break
+  return jobs
 
 def harvest_company(company: str, url: str) -> List[Job]:
-try:
-html = fetch(url)
-except Exception as e:
-print(f"[WARN] {company}: fetch failed: {e}", file=sys.stderr)
-return []
-if "greenhouse" in url:
-return parse_greenhouse(company, html)
-else:
-return parse_generic(company, html)
+    try:
+        html = fetch(url)
+    except Exception as e:
+        print(f"[WARN] {company}: fetch failed: {e}", file=sys.stderr)
+        return []
+    if "greenhouse" in url:
+        return parse_greenhouse(company, html)
+    else:
+        return parse_generic(company, html)
 
 def main():
-now = datetime.datetime.now().strftime("%Y-%m-%d_%H%M")
-out_csv = f"it_cyber_jobs_{now}.csv"
-rows: List[Tuple[str, str, str, str]] = []
+    now = datetime.datetime.now().strftime("%Y-%m-%d_%H%M")
+    out_csv = f"it_cyber_jobs_{now}.csv"
+    rows: List[Tuple[str, str, str, str]] = []
 
-for company, url in COMPANIES.items():
-print(f"Scraping {company} …")
-jobs = harvest_company(company, url)
-for j in jobs:
-rows.append((company, j.title, j.location, j.url))
-time.sleep(1) # be polite
+    for company, url in COMPANIES.items():
+        print(f"Scraping {company} …")
+        jobs = harvest_company(company, url)
+        for j in jobs:
+            rows.append((company, j.title, j.location, j.url))
+        time.sleep(1) # be polite
 
-rows = sorted(set(rows)) # de-dup
+    rows = sorted(set(rows)) # de-dup
 
-with open(out_csv, "w", newline="", encoding="utf-8") as f:
-w = csv.writer(f)
-w.writerow(["Company", "Title", "Location", "Link"])
-w.writerows(rows)
+    with open(out_csv, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["Company", "Title", "Location", "Link"])
+        w.writerows(rows)
 
-print(f"Saved {len(rows)} jobs -> {out_csv}")
-if not rows:
-print("No matches today. Edit KEYWORDS or add more companies.")
+  print(f"Saved {len(rows)} jobs -> {out_csv}")
+  if not rows:
+      print("No matches today. Edit KEYWORDS or add more companies.")
 
 if __name__ == "__main__":
-main()
+    main()
