@@ -1,30 +1,26 @@
 name: edtech-job-watcher
+
 on:
 schedule:
-# Runs every day at 13:00 UTC (that's 9:00 AM US Eastern during Daylight Time)
-- cron: "0 13 * * *"
-workflow_dispatch: {} # lets you run it manually any time
+- cron: '0 13 * * *' # 9:00 AM ET during DST
+workflow_dispatch:
 
 permissions:
-contents: write # allow the workflow to commit CSV files to the repo
+contents: write
 
 jobs:
 run:
 runs-on: ubuntu-latest
 steps:
-- name: Check out repo
-uses: actions/checkout@v4
+- uses: actions/checkout@v4
 
-- name: Set up Python
-uses: actions/setup-python@v5
+- uses: actions/setup-python@v5
 with:
-python-version: "3.11"
+python-version: '3.11'
 
-- name: Install dependencies
-run: pip install -r requirements.txt
+- run: pip install -r requirements.txt
 
-- name: Run the job watcher
-run: python edtech_job_watcher.py
+- run: python edtech_job_watcher.py
 
 - name: Commit results
 run: |
