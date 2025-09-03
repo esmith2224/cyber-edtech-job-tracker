@@ -1,31 +1,25 @@
+---
 name: edtech-job-watcher
-
 on:
-schedule:
-- cron: '0 13 * * *' # 9:00 AM ET during DST
-workflow_dispatch:
-
-permissions:
-contents: write
-
+  schedule:
+    - cron: "0 13 * * *"
+  workflow_dispatch: {}
 jobs:
-run:
-runs-on: ubuntu-latest
-steps:
-- uses: actions/checkout@v4
-
-- uses: actions/setup-python@v5
-with:
-python-version: '3.11'
-
-- run: pip install -r requirements.txt
-
-- run: python edtech_job_watcher.py
-
-- name: Commit results
-run: |
-git config user.name "job-bot"
-git config user.email "job-bot@example.com"
-git add *.csv || true
-git commit -m "Daily job scrape" || echo "No changes to commit"
-git push
+  run:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+    - run: pip install -r requirements.txt
+    - run: python edtech_job_watcher.py
+    - name: Commit results
+      run: |
+       git config user.name "job-bot"
+       git config user.email "job-bot@example.com"
+       git add *.csv || true
+       git commit -m "Daily job scrape" || echo "No changes to commit"
+       git push
