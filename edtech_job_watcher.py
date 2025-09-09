@@ -55,7 +55,7 @@ MAX_PER_SITE = 300  # safety cap
 # ------------------ Core ------------------
 
 @dataclass
-class Job:
+class job:
     company: str
     title: str
     location: str
