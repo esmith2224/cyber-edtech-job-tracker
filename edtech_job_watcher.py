@@ -7,8 +7,6 @@ import sys
 import time
 from dataclasses import dataclass
 from typing import List, Tuple
-from urllib.parse import urljoin
-
 import requests
 from bs4 import BeautifulSoup
 
@@ -25,23 +23,19 @@ COMPANIES = {
     "Chegg": "https://boards.greenhouse.io/chegg",
     "Coursera": "https://boards.greenhouse.io/coursera",
 
-    # Generic/public listings (formats vary; some may be JS-heavy)
+    # Generic/public listings (formats vary)
     "Pearson": "https://pearson.jobs/search/?q=&location=remote",
     "HMH (Houghton Mifflin Harcourt)": "https://careers.hmhco.com/jobs",
     "ETS": "https://etscareers.searchsoft.net/PD/VacancyList.aspx",
     "Curriculum Associates": "https://www.curriculumassociates.com/about/careers",
-    "NWEA": "https://www.nwea.org/about/careers/"
+    "NWEA": "https://www.nwea.org/about/careers/",
 }
 
-RAW_KEYWORDS = [
+KEYWORDS = [
     "security", "cyber", "information security", "infosec", "iam",
     "risk", "grc", "compliance", "privacy", "security analyst",
-    "security engineer", "trust", "vulnerability", "threat", "soc"
-    # intentionally removed bare "ai" (too noisy)
+    "security engineer", "trust", "vulnerability", "threat", "soc", "ai",
 ]
-
-# compile as whole-word/phrase patterns
-KEYWORD_PATTERNS = [re.compile(rf"\b{re.escape(k)}\b", re.I) for k in RAW_KEYWORDS]
 
 USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -51,11 +45,11 @@ USER_AGENT = (
 TIMEOUT = 20
 MAX_PER_SITE = 300  # safety cap
 
-
 # ------------------ Core ------------------
 
+
 @dataclass
-class job:
+class Job:
     company: str
     title: str
     location: str
@@ -70,68 +64,59 @@ def fetch(url: str) -> str:
 
 def matches_keywords(text: str) -> bool:
     t = text.lower()
-    return any(p.search(t) for p in KEYWORD_PATTERNS)
+    return any(k in t for k in KEYWORDS)
 
 
-def parse_greenhouse(company: str, html: str, base_url: str) -> List[Job]:
+def parse_greenhouse(company: str, html: str) -> List[Job]:
     soup = BeautifulSoup(html, "html.parser")
     jobs: List[Job] = []
-
-    # Typical GH markup: div.opening > a, span.location
-    for opening in soup.select("div.opening"):
-        a = opening.select_one("a[href*='/job/']")
-        if not a:
-            continue
+    # Look for job links on Greenhouse boards
+    for a in soup.select("a[href*='/job/'], a[href*='boards.greenhouse.io']"):
         title = a.get_text(strip=True)
-        href = urljoin(base_url, a.get("href") or "")
-        if not title or not href:
-            continue
-        if not matches_keywords(title):
-            continue
-        loc_el = opening.select_one(".location") or opening.find(
-            lambda tag: tag.name in ("span", "div")
-            and tag.get("class")
-            and any("location" in c.lower() for c in tag.get("class"))
-        )
-        loc = loc_el.get_text(strip=True) if loc_el else ""
-        jobs.append(Job(company, title, loc, href))
-        if len(jobs) >= MAX_PER_SITE:
-            break
-
-    # Fallback: sometimes GH pages use lists without .opening
-    if not jobs:
-        for a in soup.select("a[href*='/job/']"):
-            title = a.get_text(strip=True)
-            href = urljoin(base_url, a.get("href") or "")
-            if title and href and matches_keywords(title):
-                # try to grab a nearby location
-                loc = ""
-                loc_el = a.find_next(
-                    lambda tag: tag.name in ("span", "div")
-                    and tag.get("class")
-                    and any("location" in c.lower() for c in tag.get("class"))
-                )
-                if loc_el:
-                    loc = loc_el.get_text(strip=True)
-                jobs.append(Job(company, title, loc, href))
-                if len(jobs) >= MAX_PER_SITE:
-                    break
-
+        href = a.get("href") or ""
+        if href.startswith("/"):
+            href = "https://boards.greenhouse.io" + href
+        if title and href.startswith("http") and matches_keywords(title):
+            # Try to find a nearby location node
+            loc = ""
+            loc_el = a.find_next(
+                lambda tag: tag.name in ("span", "div")
+                and tag.get("class")
+                and any("location" in c.lower() for c in tag.get("class"))
+            )
+            if loc_el:
+                loc = loc_el.get_text(strip=True)
+            jobs.append(Job(company, title, loc, href))
+            if len(jobs) >= MAX_PER_SITE:
+                break
     return jobs
 
 
-def parse_generic(company: str, html: str, base_url: str) -> List[Job]:
+def parse_generic(company: str, html: str) -> List[Job]:
     soup = BeautifulSoup(html, "html.parser")
     jobs: List[Job] = []
-    for a in soup.select("a[href]"):
+    for a in soup.select("a"):
         title = a.get_text(" ", strip=True)
         href = a.get("href") or ""
         if not title or not href:
             continue
-        # Heuristic: keyword match + looks like a job link
-        if matches_keywords(title) and any(s in href.lower() for s in ("job", "career", "position", "opportunit")):
-            abs_url = urljoin(base_url, href)
-            jobs.append(Job(company, title, "", abs_url))
+        # Simple heuristic: keyword match + job/career in URL
+        if matches_keywords(title) and ("job" in href.lower() or "career" in href.lower()):
+            # Make absolute if relative and origin is discoverable
+            if href.startswith("/"):
+                origin = ""
+                base = soup.find("base")
+                canon = soup.find("link", rel="canonical")
+                m = None
+                if base and base.get("href"):
+                    m = re.match(r"(https?://[^/]+)", base.get("href"))
+                if (not m) and canon and canon.get("href"):
+                    m = re.match(r"(https?://[^/]+)", canon.get("href"))
+                if m:
+                    origin = m.group(1)
+                if origin:
+                    href = origin + href
+            jobs.append(Job(company, title, "", href))
             if len(jobs) >= MAX_PER_SITE:
                 break
     return jobs
@@ -143,14 +128,13 @@ def harvest_company(company: str, url: str) -> List[Job]:
     except Exception as e:
         print(f"[WARN] {company}: fetch failed: {e}", file=sys.stderr)
         return []
-
-    if "boards.greenhouse.io" in url:
-        return parse_greenhouse(company, html, url)
+    if "greenhouse" in url:
+        return parse_greenhouse(company, html)
     else:
-        return parse_generic(company, html, url)
+        return parse_generic(company, html)
 
 
-def main():
+def main() -> None:
     now = datetime.datetime.now().strftime("%Y-%m-%d_%H%M")
     out_csv = f"it_cyber_jobs_{now}.csv"
     rows: List[Tuple[str, str, str, str]] = []
